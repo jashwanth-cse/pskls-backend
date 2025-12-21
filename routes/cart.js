@@ -3,6 +3,29 @@ const router = express.Router();
 const Cart = require("../models/cart");
 const Product = require("../models/products");
 const authMiddleware = require("../middlewares/authMiddleWare");
+const { getSignedUrl } = require("../utils/gcs");
+
+// Helper to process cart images
+const processCartImages = async (cart) => {
+  if (!cart) return null;
+  const cartObj = cart.toObject ? cart.toObject() : cart;
+
+  if (cartObj.products && cartObj.products.length > 0) {
+    cartObj.products = await Promise.all(
+      cartObj.products.map(async (item) => {
+        if (item.product && item.product.img) {
+          try {
+            item.product.img = await getSignedUrl(item.product.img);
+          } catch (err) {
+            console.error(`Error signing URL for cart item ${item.product._id}:`, err.message);
+          }
+        }
+        return item;
+      })
+    );
+  }
+  return cartObj;
+};
 
 router.get("/", authMiddleware, async (req, res) => {
   try {
@@ -10,7 +33,8 @@ router.get("/", authMiddleware, async (req, res) => {
     if (!cart) {
       return res.status(200).json({ cart: { products: [] } });
     }
-    res.status(200).json({ cart });
+    const processedCart = await processCartImages(cart);
+    res.status(200).json({ cart: processedCart });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -26,7 +50,12 @@ router.post("/", authMiddleware, async (req, res) => {
         user: req.user.id,
         products: [{ product: productId, quantity: quantity || 1 }]
       });
-      return res.status(201).json({ message: "Cart created", cart });
+      // Re-fetch to populate if needed, or just return basic info. 
+      // Usually frontend re-fetches or adds manually. 
+      // For consistency, let's populate and sign.
+      const newCart = await Cart.findById(cart._id).populate("products.product");
+      const processedCart = await processCartImages(newCart);
+      return res.status(201).json({ message: "Cart created", cart: processedCart });
     }
 
     const productIndex = cart.products.findIndex(p => p.product.toString() === productId);
@@ -37,7 +66,12 @@ router.post("/", authMiddleware, async (req, res) => {
     }
 
     await cart.save();
-    res.status(200).json({ message: "Product added to cart", cart });
+
+    // Populate to sign URLs
+    const updatedCart = await Cart.findOne({ user: req.user.id }).populate("products.product");
+    const processedCart = await processCartImages(updatedCart);
+
+    res.status(200).json({ message: "Product added to cart", cart: processedCart });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -54,11 +88,13 @@ router.delete("/:productId", authMiddleware, async (req, res) => {
     await cart.save();
 
     const updatedCart = await Cart.findOne({ user: req.user.id }).populate("products.product");
-    res.status(200).json({ cart: updatedCart });
+    const processedCart = await processCartImages(updatedCart);
+    res.status(200).json({ cart: processedCart });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
+
 router.patch("/:productId", authMiddleware, async (req, res) => {
   try {
     const cart = await Cart.findOne({ user: req.user.id });
@@ -80,13 +116,14 @@ router.patch("/:productId", authMiddleware, async (req, res) => {
     } else {
       cart.products.splice(itemIndex, 1);
     }
-
+-
     await cart.save();
 
     const updatedCart = await Cart.findOne({ user: req.user.id })
       .populate("products.product");
+    const processedCart = await processCartImages(updatedCart);
 
-    res.status(200).json({ cart: updatedCart });
+    res.status(200).json({ cart: processedCart });
 
   } catch (error) {
     console.error(error);

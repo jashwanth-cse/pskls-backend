@@ -69,6 +69,17 @@ app.get("/profile", authMiddleware, async (req, res) => {
 });
 const cartRouter = require('./routes/cart');
 app.use("/cart", cartRouter);
-const orderRouter=require("./routes/order")
+
+const orderRouter = require("./routes/order");
 app.use("/order", orderRouter);
+
+const userRouter = require("./routes/user");
+app.use("/api/user", userRouter);
+
+const ratingRouter = require("./routes/ratings");
+app.use("/api/products", ratingRouter);
+
+const dealerRouter = require("./routes/dealer");
+app.use("/api/dealer", dealerRouter);
+
 
